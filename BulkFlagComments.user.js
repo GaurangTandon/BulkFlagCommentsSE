@@ -19,7 +19,8 @@
 // @exclude      *://elections.stackexchange.com/*
 // @exclude      *://openid.stackexchange.com/*
 // @exclude      *://stackexchange.com/*
-// @grant        none
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
@@ -78,11 +79,29 @@
 
         element.dispatchEvent(clickEvent);
     }
+    
+    function processTokenOnSAPage(){
+        var storedToken = GM_getValue(ACCESS_TOKEN),
+            postText = $("#answer-7936").querySelector(".post-text"),
+            hashTokenMatch = window.location.hash.match(/access_token=(.*?)(&|$)/),
+            accessToken = hashTokenMatch && hashTokenMatch[1];
+        
+        if(!storedToken){
+            postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=stackapps.com/a/7936'>this link.</a></b></p>"
+            return;
+        }
+        
+        // user was redirected from the Auth page, update stored token
+        if(accessToken) GM_setValue(ACCESS_TOKEN, accessToken);
+        
+        postText.innerHTML += "<p>Thanks, you successfully registered for an access token!</p>"
+    }
 
     var PROCESSED_CLASS = "cflag-processed",
         CHECKBOX_GROUP = "listFlagged",
         CHECKBOX_WRAPPER_DIV_CLASS = "comment-bulk-flagging",
-        BULK_FLAG_OPTIONS_CLASS = "bulk-flag-options";
+        BULK_FLAG_OPTIONS_CLASS = "bulk-flag-options",
+        ACCESS_TOKEN = "comment-bulk-flag-access-token";
 
     // reason - "ra" or "nlg"
     function flagBulk(postID, commentIDs, reason){
@@ -259,4 +278,7 @@
             node.classList.add(PROCESSED_CLASS);
         });
     }, 250);
+    
+    if(/stackapps/.test(window.location) && /7935/.test(window.location))
+        processTokenOnSAPage();
 })();
