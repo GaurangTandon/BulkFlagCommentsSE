@@ -52,9 +52,8 @@
 
         var i = 0, len = nodeList.length;
 
-        for(; i < len; i++){
-            fn.call(this, nodeList[i]);
-        }
+        for(; i < len; i++) fn.call(this, nodeList[i] || nodeList);
+
     }
 
     // get parent based on selector
@@ -72,28 +71,28 @@
 
     function invokeClick(element){
         var clickEvent = new MouseEvent("click", {
-            "view": window,
+            "view": window, // "Failed to construct 'MouseEvent': member view is not of type Window."
             "bubbles": true,
             "cancelable": false
         });
 
         element.dispatchEvent(clickEvent);
     }
-    
+
     function processTokenOnSAPage(){
-        var storedToken = GM_getValue(ACCESS_TOKEN),
+        var storedToken = GM_getValue(ACCESS_TOKEN_KEY),
             postText = $("#answer-7936").querySelector(".post-text"),
             hashTokenMatch = window.location.hash.match(/access_token=(.*?)(&|$)/),
             accessToken = hashTokenMatch && hashTokenMatch[1];
-        
-        if(!storedToken){
+
+        if(!storedToken && !accessToken){
             postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=stackapps.com/a/7936'>this link.</a></b></p>"
             return;
         }
-        
+
         // user was redirected from the Auth page, update stored token
-        if(accessToken) GM_setValue(ACCESS_TOKEN, accessToken);
-        
+        if(accessToken) GM_setValue(ACCESS_TOKEN_KEY, accessToken);
+
         postText.innerHTML += "<p>Thanks, you successfully registered for an access token!</p>"
     }
 
@@ -101,11 +100,92 @@
         CHECKBOX_GROUP = "listFlagged",
         CHECKBOX_WRAPPER_DIV_CLASS = "comment-bulk-flagging",
         BULK_FLAG_OPTIONS_CLASS = "bulk-flag-options",
-        ACCESS_TOKEN = "comment-bulk-flag-access-token";
+        ACCESS_TOKEN_KEY = "comment-bulk-flag-access-token",
+        ACCESS_TOKEN = "",
+        LAST_FLAG_TIME = 0,
+        TIME_DELAY_BETWEEN_FLAGS = 5000,
+        UNLOAD_WARNING = "You still have pending flags. Are you sure you wish to exit?";
+
+    // While I am returning a custom string, they are no longer supported
+    // https://developer.mozilla.org/en-US/docs/Web/API/WindowEventHandlers/onbeforeunload
+    window.addEventListener("beforeunload", function(e){
+        if(Date.now() < LAST_FLAG_TIME){
+            e.returnValue = UNLOAD_WARNING;
+            return UNLOAD_WARNING;
+        }
+    });
+
+    // [site].stackexchange.com OR [site].com
+    function getCurrentSiteName(){
+        var URL = window.location.href,
+            shortSite = URL.match(/(^|\/)([a-z]+)\.stackexchange/),
+            customSite = URL.match(/([a-z]+)\.com/);
+
+        return (shortSite && shortSite[2]) || (customSite && customSite[1]) || null;
+    }
+
+    function setFlagOptionsHandler(reason, commentID, site){
+        return function(){
+            function raiseFlag(){
+                var flag = new XMLHttpRequest();
+                flag.open("POST", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/add", true);
+                flag.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                flag.onload = function(data){ console.log(this.response) };
+                flag.send("key=EruI7DJUhSBCSty4NlMqGw((&site=" + site + "&option_id=" + flagID + "&access_token=" + ACCESS_TOKEN);
+            }
+
+            var data = JSON.parse(this.response), flagsAvailable = data.items, flagID = -1,
+                currTime = Date.now(), extraTimeRequired,
+                // leadTime can be negative if LAST_FLAG_TIME points to the future
+                leadTime = currTime - LAST_FLAG_TIME;
+
+            for(var i = 0, len = flagsAvailable.length; i < len; i++){
+                if(reason === flagsAvailable[i].title){
+                    flagID = flagsAvailable[i].option_id;
+                    break;
+                }
+            }
+
+            if(flagID !== -1){
+                if(leadTime >= TIME_DELAY_BETWEEN_FLAGS) {
+                    raiseFlag();
+                    LAST_FLAG_TIME = currTime;
+                }
+                else {
+                    extraTimeRequired = TIME_DELAY_BETWEEN_FLAGS - leadTime;
+                    // round 9299 to 10000 so that SE won't fail it
+                    extraTimeRequired = Math.ceil(extraTimeRequired / 1000) * 1000;
+                    console.log(extraTimeRequired, leadTime);
+                    setTimeout(raiseFlag, extraTimeRequired);
+                    LAST_FLAG_TIME += extraTimeRequired;
+                }
+            }
+        };
+    }
 
     // reason - "ra" or "nlg"
-    function flagBulk(postID, commentIDs, reason){
+    function flagBulk(accessToken, commentIDs, reason){
+        var i = 0, len = commentIDs.length, map = {
+                "nlg": "no longer needed",
+                "ra": "rude or abusive"
+            }, commentID, site = getCurrentSiteName();
 
+        reason = map[reason];
+
+        if(!site) return;
+
+        for(; i < len; i++){
+            commentID = commentIDs[i];
+            // check if can cast flag
+            var req = new XMLHttpRequest();
+            req.open("GET", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/options?key=" + encodeURIComponent("EruI7DJUhSBCSty4NlMqGw((") + "&site=" + site + "&access_token=" + encodeURIComponent(ACCESS_TOKEN), true);
+            req.addEventListener("load", setFlagOptionsHandler(reason, commentID, site));
+            req.addEventListener("error", function(e){console.log(e);});
+            req.addEventListener("abort", function(e){console.log(e);});
+            try{
+            req.send();
+            }catch(e){console.log(e);}
+        }
     }
 
     function addBulkFlag(commentsDIV){
@@ -150,7 +230,7 @@
                     checkbox.checked = checkedState;
                 });
             }, true);
-            
+
             return btn;
         }
 
@@ -170,8 +250,8 @@
                 });
 
                 flagBulk(postID, commentIDsToFlag, flagReason);
-
             });
+
             return btn;
         }
 
@@ -221,6 +301,7 @@
                 var showMoreLink = commentsDIV.nextElementSibling.querySelector(".js-show-link:not(.dno)");
                 if(showMoreLink) {
                     if(!clickedShowMoreButton) {
+                        debugger;
                         invokeClick(showMoreLink);
                         clickedShowMoreButton = true;
                     }
@@ -250,6 +331,12 @@
 
     // commentsDIV -> generally `.comments`
     function toggleBulkFlag(commentsDIV){
+        if(!ACCESS_TOKEN) {
+            if(confirm("You first need an access token. Press OK to navigate to StackApps to get it."))
+                window.open("https://stackapps.com/a/7936");
+            return;
+        }
+
         if(hasClass(commentsDIV, PROCESSED_CLASS)){
             removeBulkFlag(commentsDIV);
             commentsDIV.classList.remove(PROCESSED_CLASS);
@@ -278,7 +365,7 @@
             node.classList.add(PROCESSED_CLASS);
         });
     }, 250);
-    
-    if(/stackapps/.test(window.location) && /7935/.test(window.location))
-        processTokenOnSAPage();
+
+    if(/stackapps/.test(window.location) && /7935/.test(window.location)) processTokenOnSAPage();
+    else ACCESS_TOKEN = GM_getValue(ACCESS_TOKEN_KEY);
 })();
