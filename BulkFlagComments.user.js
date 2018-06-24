@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bulk flag comments
-// @version      0.1
+// @version      1.0.0
 // @description  flag comments in bulk easily via checkboxes
 // @author       Gaurang Tandon
 // @match        *://*.askubuntu.com/*
@@ -43,6 +43,14 @@
 		else return elms;
     }
 
+    function $ID(id){
+        return document.getElementById(id);
+    }
+
+    function $Class(id){
+        return document.getElementsByClassName(id);
+    }
+
     function hasClass(node, className){
         return node.className && new RegExp("(^|\\s)" + className + "(\\s|$)").test(node.className);
     }
@@ -69,19 +77,9 @@
         return null;
     }
 
-    function invokeClick(element){
-        var clickEvent = new MouseEvent("click", {
-            "view": window, // "Failed to construct 'MouseEvent': member view is not of type Window."
-            "bubbles": true,
-            "cancelable": false
-        });
-
-        element.dispatchEvent(clickEvent);
-    }
-
     function processTokenOnSAPage(){
         var storedToken = GM_getValue(ACCESS_TOKEN_KEY),
-            postText = $("#answer-7936").querySelector(".post-text"),
+            postText = $ID("answer-7936").querySelector(".post-text"),
             hashTokenMatch = window.location.hash.match(/access_token=(.*?)(&|$)/),
             accessToken = hashTokenMatch && hashTokenMatch[1];
 
@@ -91,9 +89,11 @@
         }
 
         // user was redirected from the Auth page, update stored token
-        if(accessToken) GM_setValue(ACCESS_TOKEN_KEY, accessToken);
+        if(accessToken) {
+            GM_setValue(ACCESS_TOKEN_KEY, storedToken = accessToken);
+        }
 
-        postText.innerHTML += "<p>Thanks, you successfully registered for an access token!</p>"
+        postText.innerHTML += "<p>Thanks, you successfully registered for an access token! Your access token is \"" + storedToken + "\". Please keep it private.";
     }
 
     var PROCESSED_CLASS = "cflag-processed",
@@ -102,42 +102,137 @@
         BULK_FLAG_OPTIONS_CLASS = "bulk-flag-options",
         ACCESS_TOKEN_KEY = "comment-bulk-flag-access-token",
         ACCESS_TOKEN = "",
-        LAST_FLAG_TIME = 0,
+        APP_KEY = "EruI7DJUhSBCSty4NlMqGw((",
         TIME_DELAY_BETWEEN_FLAGS = 5000,
-        UNLOAD_WARNING = "You still have pending flags. Are you sure you wish to exit?";
+        UNLOAD_WARNING = "You still have pending flags. Are you sure you wish to exit?",
+        USER_ID = 0,
+        SITE_NAME = "",
+        FLAG_MAP = {
+            "nlg": "no longer needed",
+            "ra": "rude or abusive"
+        },
+        // list of comment IDs
+        currentFlagQueue = {
+            "ra": [],
+            "nlg": []
+        },
+        flagCurrentlyRaised = false;
+
+    if(/stackapps/.test(window.location) && /7935/.test(window.location)) processTokenOnSAPage();
+    else ACCESS_TOKEN = GM_getValue(ACCESS_TOKEN_KEY);
+
+    // [site].stackexchange.com OR [site].com
+    (function getCurrentSiteName(){
+        var URL = window.location.href,
+            shortSite = URL.match(/(^|\/)([a-z]+)\.stackexchange/),
+            customSite = URL.match(/([a-z]+)\.com/);
+
+        SITE_NAME = (shortSite && shortSite[2]) || (customSite && customSite[1]) || null;
+    })();
+
+    (function fetchUserID(){
+        var fetchID = new XMLHttpRequest();
+        fetchID.open("GET", "https://api.stackexchange.com/2.2/me?order=desc&sort=reputation&key=" + APP_KEY + "&access_token=" + ACCESS_TOKEN + "&site=" + SITE_NAME);
+        fetchID.addEventListener("load", function(){
+            USER_ID = JSON.parse(this.response).items[0].user_id;
+            console.log("Your user id is " + USER_ID);
+        });
+
+        fetchID.send();
+    })();
 
     // While I am returning a custom string, they are no longer supported
     // https://developer.mozilla.org/en-US/docs/Web/API/WindowEventHandlers/onbeforeunload
     window.addEventListener("beforeunload", function(e){
-        if(Date.now() < LAST_FLAG_TIME){
+        if(flagCurrentlyRaised){
             e.returnValue = UNLOAD_WARNING;
             return UNLOAD_WARNING;
         }
     });
 
-    // [site].stackexchange.com OR [site].com
-    function getCurrentSiteName(){
-        var URL = window.location.href,
-            shortSite = URL.match(/(^|\/)([a-z]+)\.stackexchange/),
-            customSite = URL.match(/([a-z]+)\.com/);
+    function displaySuccess(commentID){
+        var commentLI = $ID("comment-" + commentID),
+            flagBtn = commentLI.querySelector(".comment-flag"),
+            checkbox = commentLI.querySelector("input[type=\"checkbox\"]");
 
-        return (shortSite && shortSite[2]) || (customSite && customSite[1]) || null;
+        flagBtn.classList.add("flag-on", "comment-flag-indicator");
+        flagBtn.title = "You have already flagged this comment";
+        checkbox.parentNode.removeChild(checkbox);
+        unwrapCommentLabel($("label[for=\"flag" + commentID + "\"]"));
     }
 
-    function setFlagOptionsHandler(reason, commentID, site){
+    function isSelfComment(commentID){
+        var userIDCurrent = $("#comment-" + commentID + " .comment-user").href.match(/\/(\d+)\//)[1];
+
+        return (+userIDCurrent === USER_ID);
+    }
+
+    function castDeleteRequest(commentID){
+        var deleteComment = new XMLHttpRequest();
+        deleteComment.open("POST", "https://api.stackexchange.com/2.2/comments/" + commentID + "/delete?key=" + APP_KEY + "&site=" + SITE_NAME + "&id=" + commentID + "&access_token=" + ACCESS_TOKEN);
+        deleteComment.send();
+        deleteComment.addEventListener("load", function(){
+            var response;
+            try{
+                response = JSON.parse(this.response);
+                if(response.error_name) {
+                    console.warn("Error deleting self-flagged-comment", response);
+                }
+            }catch(e){
+                console.warn("Could not parse response!", response);
+            }finally{
+                if(!response || !response.error_name) {
+                    console.log("Success!", response);
+                    displaySuccess(commentID);
+                }
+            }
+        });
+    }
+
+    function hasNextFlag(){
+        var reasons = Object.keys(FLAG_MAP);
+
+        for(var i = 0, len = reasons.length; i < len; i++)
+            if(currentFlagQueue[reasons[i]].length)
+                return true;
+
+        return false;
+    }
+
+    function setFlagOptionsHandler(reason, commentID){
         return function(){
+            // interestingly, it will allow you to raise a flag even on
+            // your own flags (doesn't stop under flag_options), but then
+            // gives a 400 error on POST request
             function raiseFlag(){
                 var flag = new XMLHttpRequest();
                 flag.open("POST", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/add", true);
                 flag.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-                flag.onload = function(data){ console.log(this.response) };
-                flag.send("key=EruI7DJUhSBCSty4NlMqGw((&site=" + site + "&option_id=" + flagID + "&access_token=" + ACCESS_TOKEN);
+                flag.onload = function(data){
+                    var response;
+                    try{
+                        response = JSON.parse(this.response);
+                        if(response.error_name) {
+                            //  cast delete vote self-comment
+                            if(isSelfComment(commentID)) castDeleteRequest(commentID);
+                            else console.warn("Error received!", response);
+                        }
+                    }catch(e){
+                        console.warn("Could not parse response!", response);
+                    }finally{
+                        if(!response || !response.error_name) {
+                            console.log("Success!", response);
+                            displaySuccess(commentID);
+                        }
+                    }
+
+                    if(hasNextFlag()) setTimeout(flagNextComment, TIME_DELAY_BETWEEN_FLAGS);
+                    else flagCurrentlyRaised = false;
+                };
+                flag.send("key=" + APP_KEY + "&site=" + SITE_NAME + "&option_id=" + flagID + "&access_token=" + ACCESS_TOKEN);
             }
 
-            var data = JSON.parse(this.response), flagsAvailable = data.items, flagID = -1,
-                currTime = Date.now(), extraTimeRequired,
-                // leadTime can be negative if LAST_FLAG_TIME points to the future
-                leadTime = currTime - LAST_FLAG_TIME;
+            var data = JSON.parse(this.response), flagsAvailable = data.items, flagID = -1;
 
             for(var i = 0, len = flagsAvailable.length; i < len; i++){
                 if(reason === flagsAvailable[i].title){
@@ -146,46 +241,38 @@
                 }
             }
 
-            if(flagID !== -1){
-                if(leadTime >= TIME_DELAY_BETWEEN_FLAGS) {
-                    raiseFlag();
-                    LAST_FLAG_TIME = currTime;
-                }
-                else {
-                    extraTimeRequired = TIME_DELAY_BETWEEN_FLAGS - leadTime;
-                    // round 9299 to 10000 so that SE won't fail it
-                    extraTimeRequired = Math.ceil(extraTimeRequired / 1000) * 1000;
-                    console.log(extraTimeRequired, leadTime);
-                    setTimeout(raiseFlag, extraTimeRequired);
-                    LAST_FLAG_TIME += extraTimeRequired;
-                }
-            }
+            if(flagID !== -1) raiseFlag();            
         };
     }
 
-    // reason - "ra" or "nlg"
-    function flagBulk(accessToken, commentIDs, reason){
-        var i = 0, len = commentIDs.length, map = {
-                "nlg": "no longer needed",
-                "ra": "rude or abusive"
-            }, commentID, site = getCurrentSiteName();
+    function flagNextComment(){
+        var reasons = Object.keys(FLAG_MAP), reason, commentID, req;
+        flagCurrentlyRaised = false;
 
-        reason = map[reason];
+        for(var i = 0, len = reasons.length; i < len; i++){
+            reason = reasons[i];
+            if(!currentFlagQueue[reason].length) continue;
 
-        if(!site) return;
+            commentID = currentFlagQueue[reason].pop();
+            req = new XMLHttpRequest();
 
-        for(; i < len; i++){
-            commentID = commentIDs[i];
-            // check if can cast flag
-            var req = new XMLHttpRequest();
-            req.open("GET", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/options?key=" + encodeURIComponent("EruI7DJUhSBCSty4NlMqGw((") + "&site=" + site + "&access_token=" + encodeURIComponent(ACCESS_TOKEN), true);
-            req.addEventListener("load", setFlagOptionsHandler(reason, commentID, site));
-            req.addEventListener("error", function(e){console.log(e);});
-            req.addEventListener("abort", function(e){console.log(e);});
-            try{
+            req.open("GET", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/options?key=" + encodeURIComponent("EruI7DJUhSBCSty4NlMqGw((") + "&site=" + SITE_NAME + "&access_token=" + encodeURIComponent(ACCESS_TOKEN), true);
+            req.addEventListener("load", setFlagOptionsHandler(FLAG_MAP[reason], commentID));
             req.send();
-            }catch(e){console.log(e);}
+
+            flagCurrentlyRaised = true;
+
+            break; // do not flag for more than one reason at once
         }
+    }
+
+    // reason - "ra" or "nlg"
+    function flagBulk(commentIDs, reason){
+        if(!SITE_NAME) return;
+
+        currentFlagQueue[reason] = currentFlagQueue[reason].concat(commentIDs);
+
+        if(!flagCurrentlyRaised) flagNextComment();
     }
 
     function addBulkFlag(commentsDIV){
@@ -249,7 +336,7 @@
                     commentIDsToFlag.push(checkbox.value);
                 });
 
-                flagBulk(postID, commentIDsToFlag, flagReason);
+                flagBulk(commentIDsToFlag, flagReason);
             });
 
             return btn;
@@ -274,59 +361,46 @@
 
         var commentList = commentsDIV.querySelector("ul").children, groupFlagType = "checkbox";
 
-        function invokeWhenAllCommentsLoaded(){
-            forEach(commentList, function(comment){
-                var actions = comment.querySelector(".comment-actions"),
-                    commentID = comment.dataset.commentId,
-                    divWrapper = divWrapperForCommentAction(commentID),
-                    spanCommentText = actions.nextElementSibling.querySelector(".comment-copy"),
-                    spanReplacement = document.createElement("label");
+        // assume that the user can flag only those comments which are visible
+        // if a user wishes to flag comments hidden under a "show X more comments" link
+        // they should open those comments first and only THEN click our button
+        forEach(commentList, function(comment){
+            var actions = comment.querySelector(".comment-actions"),
+                commentID = comment.dataset.commentId,
+                divWrapper = divWrapperForCommentAction(commentID),
+                spanCommentText = actions.nextElementSibling.querySelector(".comment-copy"),
+                spanReplacement = document.createElement("label");
 
-                // make it second element
-                actions.insertBefore(divWrapper, actions.children[1]);
+            // make it second element
+            actions.insertBefore(divWrapper, actions.children[1]);
 
-                // enable click anywhere on comment to highlight checkbox
-                spanReplacement.innerHTML = spanCommentText.innerHTML;
-                spanReplacement.setAttribute("for", "flag" + commentID);
-                spanReplacement.className = spanCommentText.className;
-                spanCommentText.parentNode.replaceChild(spanReplacement, spanCommentText);
-            });
+            // enable click anywhere on comment to highlight checkbox
+            spanReplacement.innerHTML = spanCommentText.innerHTML;
+            spanReplacement.setAttribute("for", "flag" + commentID);
+            spanReplacement.className = spanCommentText.className;
+            spanCommentText.parentNode.replaceChild(spanReplacement, spanCommentText);
+        });
 
-            window.location.href = "#" + commentsDIV.id;
-        }
+        window.location.href = "#" + commentsDIV.id;
+    }
 
-        var clickedShowMoreButton = false,
-            checkAllCommentsLoaded = setInterval(function(){
-                // expand comment list
-                var showMoreLink = commentsDIV.nextElementSibling.querySelector(".js-show-link:not(.dno)");
-                if(showMoreLink) {
-                    if(!clickedShowMoreButton) {
-                        debugger;
-                        invokeClick(showMoreLink);
-                        clickedShowMoreButton = true;
-                    }
-                }else{
-                    clearInterval(checkAllCommentsLoaded);
-                    invokeWhenAllCommentsLoaded();
-                }
-            }, 200);
+    function unwrapCommentLabel(label){
+        var commentText = label.innerHTML, parent = label.parentNode;
+        parent.removeChild(label);
+        parent.innerHTML = "<span class=\"comment-copy\">" + commentText + "</span>" + parent.innerHTML;
     }
 
     function removeBulkFlag(commentsDIV){
-        var checkboxDIVs = $("." + CHECKBOX_WRAPPER_DIV_CLASS);
+        var checkboxDIVs = commentsDIV.querySelectorAll("." + CHECKBOX_WRAPPER_DIV_CLASS);
         forEach(checkboxDIVs, function(div){
             div.parentNode.removeChild(div);
         });
 
-        var optionsDIV = $("." + BULK_FLAG_OPTIONS_CLASS);
+        var optionsDIV = $Class(BULK_FLAG_OPTIONS_CLASS);
         optionsDIV.parentNode.removeChild(optionsDIV);
 
         // unwrap the label
-        forEach($("label[for^=\"flag\""), function(label){
-            var commentText = label.innerHTML, parent = label.parentNode;
-            parent.removeChild(label);
-            parent.innerHTML = "<span class=\"comment-copy\">" + commentText + "</span>" + parent.innerHTML;
-        });
+        forEach($("label[for^=\"flag\""), unwrapCommentLabel);
     }
 
     // commentsDIV -> generally `.comments`
@@ -365,7 +439,4 @@
             node.classList.add(PROCESSED_CLASS);
         });
     }, 250);
-
-    if(/stackapps/.test(window.location) && /7935/.test(window.location)) processTokenOnSAPage();
-    else ACCESS_TOKEN = GM_getValue(ACCESS_TOKEN_KEY);
 })();
