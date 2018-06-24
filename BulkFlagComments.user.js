@@ -26,8 +26,10 @@
 (function() {
     'use strict';
 
-    function $(selector){
-        var elms = document.querySelectorAll(selector), elm, len = elms.length;
+    function q(selector){
+        var elms = document.querySelectorAll(selector),
+            elm,
+            len = elms.length;
 
 		// cannot always return a NodeList/Array
 		// as properties like firstChild, lastChild will only be able
@@ -52,16 +54,15 @@
     }
 
     function hasClass(node, className){
-        return node.className && new RegExp("(^|\\s)" + className + "(\\s|$)").test(node.className);
+        return node.classList.contains(className);
     }
 
     function forEach(nodeList, fn){
         if(!nodeList) return;
 
-        var i = 0, len = nodeList.length;
-
-        for(; i < len; i++) fn.call(this, nodeList[i] || nodeList);
-
+        for(var i = 0, len = nodeList.length; i < len; i++){
+            fn.call(this, nodeList[i] || nodeList);
+        }
     }
 
     // get parent based on selector
@@ -158,11 +159,11 @@
         flagBtn.classList.add("flag-on", "comment-flag-indicator");
         flagBtn.title = "You have already flagged this comment";
         checkbox.parentNode.removeChild(checkbox);
-        unwrapCommentLabel($("label[for=\"flag" + commentID + "\"]"));
+        unwrapCommentLabel(q("label[for=\"flag" + commentID + "\"]"));
     }
 
     function isSelfComment(commentID){
-        var userIDCurrent = $("#comment-" + commentID + " .comment-user").href.match(/\/(\d+)\//)[1];
+        var userIDCurrent = q("#comment-" + commentID + " .comment-user").href.match(/\/(\d+)\//)[1];
 
         return (+userIDCurrent === USER_ID);
     }
@@ -192,9 +193,11 @@
     function hasNextFlag(){
         var reasons = Object.keys(FLAG_MAP);
 
-        for(var i = 0, len = reasons.length; i < len; i++)
-            if(currentFlagQueue[reasons[i]].length)
+        for(var i = 0, len = reasons.length; i < len; i++){
+            if(currentFlagQueue[reasons[i]].length){
                 return true;
+            }
+        }
 
         return false;
     }
@@ -232,7 +235,9 @@
                 flag.send("key=" + APP_KEY + "&site=" + SITE_NAME + "&option_id=" + flagID + "&access_token=" + ACCESS_TOKEN);
             }
 
-            var data = JSON.parse(this.response), flagsAvailable = data.items, flagID = -1;
+            var data = JSON.parse(this.response),
+                flagsAvailable = data.items,
+                flagID = -1;
 
             for(var i = 0, len = flagsAvailable.length; i < len; i++){
                 if(reason === flagsAvailable[i].title){
@@ -246,7 +251,11 @@
     }
 
     function flagNextComment(){
-        var reasons = Object.keys(FLAG_MAP), reason, commentID, req;
+        var reasons = Object.keys(FLAG_MAP),
+            reason,
+            commentID,
+            req;
+
         flagCurrentlyRaised = false;
 
         for(var i = 0, len = reasons.length; i < len; i++){
@@ -310,10 +319,10 @@
             var btn = document.createElement("button");
             btn.innerHTML = "select all";
             btn.addEventListener("click", function(event){
-                var uncheckedElements = $("[name=\"" + CHECKBOX_GROUP + "\"]:not(:checked)"),
+                var uncheckedElements = q("[name=\"" + CHECKBOX_GROUP + "\"]:not(:checked)"),
                     checkedState = !!uncheckedElements;
 
-                forEach($("[name=\"" + CHECKBOX_GROUP + "\"]"), function(checkbox){
+                forEach(q("[name=\"" + CHECKBOX_GROUP + "\"]"), function(checkbox){
                     checkbox.checked = checkedState;
                 });
             }, true);
@@ -326,8 +335,8 @@
             btn.innerHTML = "flag";
             btn.addEventListener("click", function(event){
                 var commentIDsToFlag = [],
-                    checkedComments = $("[name=\"" + CHECKBOX_GROUP + "\"]:checked"),
-                    flagReason = $("[name=\"" + flagOptionsGroup + "\"]:checked").value,
+                    checkedComments = q("[name=\"" + CHECKBOX_GROUP + "\"]:checked"),
+                    flagReason = q("[name=\"" + flagOptionsGroup + "\"]:checked").value,
                     postID = commentsDIV.id.match(/\d+/)[0];
 
                 if(!checkedComments) alert("No comment selected");
@@ -400,14 +409,15 @@
         optionsDIV.parentNode.removeChild(optionsDIV);
 
         // unwrap the label
-        forEach($("label[for^=\"flag\""), unwrapCommentLabel);
+        forEach(q("label[for^=\"flag\""), unwrapCommentLabel);
     }
 
     // commentsDIV -> generally `.comments`
     function toggleBulkFlag(commentsDIV){
         if(!ACCESS_TOKEN) {
-            if(confirm("You first need an access token. Press OK to navigate to StackApps to get it."))
+            if(confirm("You first need an access token. Press OK to navigate to StackApps to get it.")){
                 window.open("https://stackapps.com/a/7936");
+            }
             return;
         }
 
@@ -421,10 +431,11 @@
     }
 
     setInterval(function(){
-        var nodes = $(".post-menu:not(." + PROCESSED_CLASS + ")");
+        var nodes = q(".post-menu:not(." + PROCESSED_CLASS + ")");
 
         forEach(nodes, function(node){
-            var a = document.createElement("A"), commentsDIV;
+            var a = document.createElement("A"),
+                commentsDIV;
             a.innerHTML = a.className = "cflag";
             a.title = "comment bulk flag";
 
