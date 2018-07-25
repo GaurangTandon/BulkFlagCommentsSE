@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bulk flag comments
-// @version      1.0.0
+// @version      1.0.1
 // @description  flag comments in bulk easily via checkboxes
 // @author       Gaurang Tandon
 // @match        *://*.askubuntu.com/*
@@ -85,7 +85,7 @@
             accessToken = hashTokenMatch && hashTokenMatch[1];
 
         if(!storedToken && !accessToken){
-            postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=stackapps.com/a/7936'>this link.</a></b></p>"
+            postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=https://stackapps.com/a/7936'>this link.</a></b></p>"
             return;
         }
 
