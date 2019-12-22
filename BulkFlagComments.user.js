@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bulk flag comments
-// @version      1.0.2
+// @version      1.0.3
 // @description  flag comments in bulk easily via checkboxes
 // @author       Gaurang Tandon
 // @match        *://*.askubuntu.com/*
@@ -436,20 +436,24 @@
         var nodes = q(".post-menu:not(." + PROCESSED_CLASS + ")");
 
         forEach(nodes, function (node) {
+            if (node.parentElement.matches(".revcell3")) {
+                // do not add cflag comment in revision page cells
+                return;
+            }
             var a = document.createElement("A"),
                 commentsDIV;
             a.innerHTML = a.className = "cflag";
             a.title = "comment bulk flag";
 
             node.appendChild(a);
+            node.classList.add(PROCESSED_CLASS);
+
             commentsDIV = getParent(a, ".post-layout").querySelector(".comments");
             a.href = "#" + commentsDIV.id;
 
             a.addEventListener("click", function (event) {
                 toggleBulkFlag(commentsDIV);
             });
-
-            node.classList.add(PROCESSED_CLASS);
         });
     }, 250);
 })();
