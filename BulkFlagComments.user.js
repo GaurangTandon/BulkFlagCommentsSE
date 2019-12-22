@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bulk flag comments
-// @version      1.0.1
+// @version      1.0.2
 // @description  flag comments in bulk easily via checkboxes
 // @author       Gaurang Tandon
 // @match        *://*.askubuntu.com/*
@@ -23,54 +23,54 @@
 // @grant        GM_getValue
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
-    function q(selector){
+    function q(selector) {
         var elms = document.querySelectorAll(selector),
             elm,
             len = elms.length;
 
-		// cannot always return a NodeList/Array
-		// as properties like firstChild, lastChild will only be able
-		// to be accessed by elms[0].lastChild which is too cumbersome
-        if(len === 0) return null;
-		else if (len === 1) {
-			elm = elms[0];
-			// so that I can access the length of the returned
-			// value else length if undefined
-			elm.length = 1;
-			return elm;
-		}
-		else return elms;
+        // cannot always return a NodeList/Array
+        // as properties like firstChild, lastChild will only be able
+        // to be accessed by elms[0].lastChild which is too cumbersome
+        if (len === 0) return null;
+        else if (len === 1) {
+            elm = elms[0];
+            // so that I can access the length of the returned
+            // value else length if undefined
+            elm.length = 1;
+            return elm;
+        }
+        else return elms;
     }
 
-    function $ID(id){
+    function $ID(id) {
         return document.getElementById(id);
     }
 
-    function $Class(id){
+    function $Class(id) {
         return document.getElementsByClassName(id);
     }
 
-    function hasClass(node, className){
+    function hasClass(node, className) {
         return node.classList.contains(className);
     }
 
-    function forEach(nodeList, fn){
-        if(!nodeList) return;
+    function forEach(nodeList, fn) {
+        if (!nodeList) return;
 
-        for(var i = 0, len = nodeList.length; i < len; i++){
+        for (var i = 0, len = nodeList.length; i < len; i++) {
             fn.call(this, nodeList[i] || nodeList);
         }
     }
 
     // get parent based on selector
-    function getParent(node, selector){
+    function getParent(node, selector) {
         var parent = node.parentNode;
 
-        while(parent){
-            if(parent.matches(selector)) return parent;
+        while (parent) {
+            if (parent.matches(selector)) return parent;
 
             parent = parent.parentNode;
         }
@@ -78,20 +78,21 @@
         return null;
     }
 
-    function processTokenOnSAPage(){
+    function processTokenOnSAPage() {
         var storedToken = GM_getValue(ACCESS_TOKEN_KEY),
             postText = $ID("answer-7936").querySelector(".post-text"),
             hashTokenMatch = window.location.hash.match(/access_token=(.*?)(&|$)/),
             accessToken = hashTokenMatch && hashTokenMatch[1];
 
-        if(!storedToken && !accessToken){
-            postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=https://stackapps.com/a/7936'>this link.</a></b></p>"
+        if (!storedToken && !accessToken) {
+            postText.innerHTML += "<p><b>Please register for an access token at <a href='https://stackoverflow.com/oauth/dialog?client_id=12678&scope=write_access,no_expiry&redirect_uri=https://stackapps.com/questions/7935/bulk-flag-comments/7936'>this link.</a></b></p>"
             return;
         }
 
         // user was redirected from the Auth page, update stored token
-        if(accessToken) {
+        if (accessToken) {
             GM_setValue(ACCESS_TOKEN_KEY, storedToken = accessToken);
+            window.location.hash = '#7936';
         }
 
         postText.innerHTML += "<p>Thanks, you successfully registered for an access token! Your access token is \"" + storedToken + "\". Please keep it private.";
@@ -109,8 +110,8 @@
         USER_ID = 0,
         SITE_NAME = "",
         FLAG_MAP = {
-            "nlg": "no longer needed",
-            "ra": "rude or abusive"
+            "nlg": "It's no longer needed.",
+            "ra": "It contains harassment, bigotry, or abuse."
         },
         // list of comment IDs
         currentFlagQueue = {
@@ -119,11 +120,12 @@
         },
         flagCurrentlyRaised = false;
 
-    if(/stackapps/.test(window.location) && /7935/.test(window.location)) processTokenOnSAPage();
-    else ACCESS_TOKEN = GM_getValue(ACCESS_TOKEN_KEY);
+    if (/stackapps/.test(window.location) && /7935/.test(window.location)) processTokenOnSAPage();
+
+    ACCESS_TOKEN = GM_getValue(ACCESS_TOKEN_KEY);
 
     // [site].stackexchange.com OR [site].com
-    (function getCurrentSiteName(){
+    (function getCurrentSiteName() {
         var URL = window.location.href,
             shortSite = URL.match(/(^|\/)([a-z]+)\.stackexchange/),
             customSite = URL.match(/([a-z]+)\.com/);
@@ -131,10 +133,10 @@
         SITE_NAME = (shortSite && shortSite[2]) || (customSite && customSite[1]) || null;
     })();
 
-    (function fetchUserID(){
+    (function fetchUserID() {
         var fetchID = new XMLHttpRequest();
         fetchID.open("GET", "https://api.stackexchange.com/2.2/me?order=desc&sort=reputation&key=" + APP_KEY + "&access_token=" + ACCESS_TOKEN + "&site=" + SITE_NAME);
-        fetchID.addEventListener("load", function(){
+        fetchID.addEventListener("load", function () {
             USER_ID = JSON.parse(this.response).items[0].user_id;
             console.log("Your user id is " + USER_ID);
         });
@@ -144,45 +146,45 @@
 
     // While I am returning a custom string, they are no longer supported
     // https://developer.mozilla.org/en-US/docs/Web/API/WindowEventHandlers/onbeforeunload
-    window.addEventListener("beforeunload", function(e){
-        if(flagCurrentlyRaised){
+    window.addEventListener("beforeunload", function (e) {
+        if (flagCurrentlyRaised) {
             e.returnValue = UNLOAD_WARNING;
             return UNLOAD_WARNING;
         }
     });
 
-    function displaySuccess(commentID){
+    function displaySuccess(commentID) {
         var commentLI = $ID("comment-" + commentID),
-            flagBtn = commentLI.querySelector(".comment-flag"),
+            flagBtn = commentLI.querySelector('.js-comment-flag'),
             checkbox = commentLI.querySelector("input[type=\"checkbox\"]");
 
-        flagBtn.classList.add("flag-on", "comment-flag-indicator");
+        flagBtn.classList.replace('fc-black-100', 'fc-red-500');
         flagBtn.title = "You have already flagged this comment";
         checkbox.parentNode.removeChild(checkbox);
         unwrapCommentLabel(q("label[for=\"flag" + commentID + "\"]"));
     }
 
-    function isSelfComment(commentID){
+    function isSelfComment(commentID) {
         var userIDCurrent = q("#comment-" + commentID + " .comment-user").href.match(/\/(\d+)\//)[1];
 
         return (+userIDCurrent === USER_ID);
     }
 
-    function castDeleteRequest(commentID){
+    function castDeleteRequest(commentID) {
         var deleteComment = new XMLHttpRequest();
         deleteComment.open("POST", "https://api.stackexchange.com/2.2/comments/" + commentID + "/delete?key=" + APP_KEY + "&site=" + SITE_NAME + "&id=" + commentID + "&access_token=" + ACCESS_TOKEN);
         deleteComment.send();
-        deleteComment.addEventListener("load", function(){
+        deleteComment.addEventListener("load", function () {
             var response;
-            try{
+            try {
                 response = JSON.parse(this.response);
-                if(response.error_name) {
+                if (response.error_name) {
                     console.warn("Error deleting self-flagged-comment", response);
                 }
-            }catch(e){
+            } catch (e) {
                 console.warn("Could not parse response!", response);
-            }finally{
-                if(!response || !response.error_name) {
+            } finally {
+                if (!response || !response.error_name) {
                     console.log("Success!", response);
                     displaySuccess(commentID);
                 }
@@ -190,11 +192,11 @@
         });
     }
 
-    function hasNextFlag(){
+    function hasNextFlag() {
         var reasons = Object.keys(FLAG_MAP);
 
-        for(var i = 0, len = reasons.length; i < len; i++){
-            if(currentFlagQueue[reasons[i]].length){
+        for (var i = 0, len = reasons.length; i < len; i++) {
+            if (currentFlagQueue[reasons[i]].length) {
                 return true;
             }
         }
@@ -202,34 +204,34 @@
         return false;
     }
 
-    function setFlagOptionsHandler(reason, commentID){
-        return function(){
+    function setFlagOptionsHandler(reason, commentID) {
+        return function () {
             // interestingly, it will allow you to raise a flag even on
             // your own flags (doesn't stop under flag_options), but then
             // gives a 400 error on POST request
-            function raiseFlag(){
+            function raiseFlag() {
                 var flag = new XMLHttpRequest();
                 flag.open("POST", "https://api.stackexchange.com/2.2/comments/" + commentID + "/flags/add", true);
                 flag.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-                flag.onload = function(data){
+                flag.onload = function (data) {
                     var response;
-                    try{
+                    try {
                         response = JSON.parse(this.response);
-                        if(response.error_name) {
+                        if (response.error_name) {
                             //  cast delete vote self-comment
-                            if(isSelfComment(commentID)) castDeleteRequest(commentID);
+                            if (isSelfComment(commentID)) castDeleteRequest(commentID);
                             else console.warn("Error received!", response);
                         }
-                    }catch(e){
+                    } catch (e) {
                         console.warn("Could not parse response!", response);
-                    }finally{
-                        if(!response || !response.error_name) {
+                    } finally {
+                        if (!response || !response.error_name) {
                             console.log("Success!", response);
                             displaySuccess(commentID);
                         }
                     }
 
-                    if(hasNextFlag()) setTimeout(flagNextComment, TIME_DELAY_BETWEEN_FLAGS);
+                    if (hasNextFlag()) setTimeout(flagNextComment, TIME_DELAY_BETWEEN_FLAGS);
                     else flagCurrentlyRaised = false;
                 };
                 flag.send("key=" + APP_KEY + "&site=" + SITE_NAME + "&option_id=" + flagID + "&access_token=" + ACCESS_TOKEN);
@@ -239,18 +241,18 @@
                 flagsAvailable = data.items,
                 flagID = -1;
 
-            for(var i = 0, len = flagsAvailable.length; i < len; i++){
-                if(reason === flagsAvailable[i].title){
+            for (var i = 0, len = flagsAvailable.length; i < len; i++) {
+                if (reason === flagsAvailable[i].title) {
                     flagID = flagsAvailable[i].option_id;
                     break;
                 }
             }
 
-            if(flagID !== -1) raiseFlag();            
+            if (flagID !== -1) raiseFlag();
         };
     }
 
-    function flagNextComment(){
+    function flagNextComment() {
         var reasons = Object.keys(FLAG_MAP),
             reason,
             commentID,
@@ -258,9 +260,9 @@
 
         flagCurrentlyRaised = false;
 
-        for(var i = 0, len = reasons.length; i < len; i++){
+        for (var i = 0, len = reasons.length; i < len; i++) {
             reason = reasons[i];
-            if(!currentFlagQueue[reason].length) continue;
+            if (!currentFlagQueue[reason].length) continue;
 
             commentID = currentFlagQueue[reason].pop();
             req = new XMLHttpRequest();
@@ -276,16 +278,16 @@
     }
 
     // reason - "ra" or "nlg"
-    function flagBulk(commentIDs, reason){
-        if(!SITE_NAME) return;
+    function flagBulk(commentIDs, reason) {
+        if (!SITE_NAME) return;
 
         currentFlagQueue[reason] = currentFlagQueue[reason].concat(commentIDs);
 
-        if(!flagCurrentlyRaised) flagNextComment();
+        if (!flagCurrentlyRaised) flagNextComment();
     }
 
-    function addBulkFlag(commentsDIV){
-        function divWrapperForCommentAction(commentID){
+    function addBulkFlag(commentsDIV) {
+        function divWrapperForCommentAction(commentID) {
             var inpLabel = createInput(groupFlagType, "", commentID, CHECKBOX_GROUP),
                 div = document.createElement("div"),
                 a = document.createElement("a");
@@ -301,7 +303,7 @@
             return div;
         }
 
-        function createInput(type, text, value, groupName){
+        function createInput(type, text, value, groupName) {
             var inp = document.createElement("input"),
                 label = document.createElement("label");
 
@@ -315,14 +317,14 @@
             return label;
         }
 
-        function createSelectAllButton(){
+        function createSelectAllButton() {
             var btn = document.createElement("button");
             btn.innerHTML = "select all";
-            btn.addEventListener("click", function(event){
+            btn.addEventListener("click", function (event) {
                 var uncheckedElements = q("[name=\"" + CHECKBOX_GROUP + "\"]:not(:checked)"),
                     checkedState = !!uncheckedElements;
 
-                forEach(q("[name=\"" + CHECKBOX_GROUP + "\"]"), function(checkbox){
+                forEach(q("[name=\"" + CHECKBOX_GROUP + "\"]"), function (checkbox) {
                     checkbox.checked = checkedState;
                 });
             }, true);
@@ -330,18 +332,18 @@
             return btn;
         }
 
-        function createFlagButton(){
+        function createFlagButton() {
             var btn = document.createElement("button");
             btn.innerHTML = "flag";
-            btn.addEventListener("click", function(event){
+            btn.addEventListener("click", function (event) {
                 var commentIDsToFlag = [],
                     checkedComments = q("[name=\"" + CHECKBOX_GROUP + "\"]:checked"),
                     flagReason = q("[name=\"" + flagOptionsGroup + "\"]:checked").value,
                     postID = commentsDIV.id.match(/\d+/)[0];
 
-                if(!checkedComments) alert("No comment selected");
+                if (!checkedComments) alert("No comment selected");
 
-                forEach(checkedComments, function(checkbox){
+                forEach(checkedComments, function (checkbox) {
                     commentIDsToFlag.push(checkbox.value);
                 });
 
@@ -353,8 +355,8 @@
 
         var flagOptionsContainer = document.createElement("div"),
             flagOptionsGroup = "flagOptions", flagOptionsType = "radio",
-            raInput = createInput(flagOptionsType, "rude and abusive", "ra", flagOptionsGroup),
-            nlgInput = createInput(flagOptionsType, "no longer needed", "nlg", flagOptionsGroup),
+            raInput = createInput(flagOptionsType, FLAG_MAP["ra"], "ra", flagOptionsGroup),
+            nlgInput = createInput(flagOptionsType, FLAG_MAP["nlg"], "nlg", flagOptionsGroup),
             selectAllBtn = createSelectAllButton(),
             flagBtn = createFlagButton();
 
@@ -373,7 +375,7 @@
         // assume that the user can flag only those comments which are visible
         // if a user wishes to flag comments hidden under a "show X more comments" link
         // they should open those comments first and only THEN click our button
-        forEach(commentList, function(comment){
+        forEach(commentList, function (comment) {
             var actions = comment.querySelector(".comment-actions"),
                 commentID = comment.dataset.commentId,
                 divWrapper = divWrapperForCommentAction(commentID),
@@ -393,15 +395,15 @@
         window.location.href = "#" + commentsDIV.id;
     }
 
-    function unwrapCommentLabel(label){
+    function unwrapCommentLabel(label) {
         var commentText = label.innerHTML, parent = label.parentNode;
         parent.removeChild(label);
         parent.innerHTML = "<span class=\"comment-copy\">" + commentText + "</span>" + parent.innerHTML;
     }
 
-    function removeBulkFlag(commentsDIV){
+    function removeBulkFlag(commentsDIV) {
         var checkboxDIVs = commentsDIV.querySelectorAll("." + CHECKBOX_WRAPPER_DIV_CLASS);
-        forEach(checkboxDIVs, function(div){
+        forEach(checkboxDIVs, function (div) {
             div.parentNode.removeChild(div);
         });
 
@@ -413,27 +415,27 @@
     }
 
     // commentsDIV -> generally `.comments`
-    function toggleBulkFlag(commentsDIV){
-        if(!ACCESS_TOKEN) {
-            if(confirm("You first need an access token. Press OK to navigate to StackApps to get it.")){
+    function toggleBulkFlag(commentsDIV) {
+        if (!ACCESS_TOKEN) {
+            if (confirm("You first need an access token. Press OK to navigate to StackApps to get it.")) {
                 window.open("https://stackapps.com/a/7936");
             }
             return;
         }
 
-        if(hasClass(commentsDIV, PROCESSED_CLASS)){
+        if (hasClass(commentsDIV, PROCESSED_CLASS)) {
             removeBulkFlag(commentsDIV);
             commentsDIV.classList.remove(PROCESSED_CLASS);
-        }else {
+        } else {
             addBulkFlag(commentsDIV);
             commentsDIV.classList.add(PROCESSED_CLASS);
         }
     }
 
-    setInterval(function(){
+    setInterval(function () {
         var nodes = q(".post-menu:not(." + PROCESSED_CLASS + ")");
 
-        forEach(nodes, function(node){
+        forEach(nodes, function (node) {
             var a = document.createElement("A"),
                 commentsDIV;
             a.innerHTML = a.className = "cflag";
@@ -443,7 +445,7 @@
             commentsDIV = getParent(a, ".post-layout").querySelector(".comments");
             a.href = "#" + commentsDIV.id;
 
-            a.addEventListener("click", function(event){
+            a.addEventListener("click", function (event) {
                 toggleBulkFlag(commentsDIV);
             });
 
